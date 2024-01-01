@@ -1,3 +1,5 @@
+import 'package:chat_app/widgets/chat_messages.dart';
+import 'package:chat_app/widgets/new_message.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -12,13 +14,23 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Column(mainAxisSize: MainAxisSize.min,children: [
-          const Text("Chat room h bahi yh."),
-          ElevatedButton(onPressed: () {
-            FirebaseAuth.instance.signOut();
-          }, child: const Text("Logout"))
-        ]),
+      appBar: AppBar(
+        title: const Text(
+          "Flutter chat",
+        ),
+        actions: [
+          IconButton(
+              onPressed: () => FirebaseAuth.instance.signOut(),
+              icon: const Icon(Icons.logout))
+        ],
+      ),
+      body: const Column(
+        children: [
+          Expanded(
+            child: ChatMessage(),
+          ),
+          NewMessage()
+        ],
       ),
     );
   }

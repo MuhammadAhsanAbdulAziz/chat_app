@@ -1,13 +1,12 @@
 import 'dart:io';
 
 import 'package:chat_app/widgets/user_image_picker.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 final _firebase = FirebaseAuth.instance;
-final _firebaseRef = FirebaseStorage.instance.ref("user_images");
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -21,20 +20,46 @@ class _AuthScreenState extends State<AuthScreen> {
   var _isLogin = true;
   var _enteredEmail = '';
   var _enteredPassword = '';
+  var _enteredUsername = '';
   var _isPasswordShowing = false;
-  XFile? _userPickedImage;
+  File? _userPickedImage;
+  var _isAuthenticating = false;
 
   void _submit() async {
     final isValid = _formKey.currentState!.validate();
+    if (_userPickedImage == null && !_isLogin) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("Enter Profile Image")));
+      return;
+    }
     if (isValid) {
+      setState(() {
+        _isAuthenticating = true;
+      });
       _formKey.currentState!.save();
       try {
         if (_isLogin) {
           await _firebase.signInWithEmailAndPassword(
               email: _enteredEmail, password: _enteredPassword);
         } else {
-          await _firebase.createUserWithEmailAndPassword(
-              email: _enteredEmail, password: _enteredPassword);
+          final userCredentials =
+              await _firebase.createUserWithEmailAndPassword(
+                  email: _enteredEmail, password: _enteredPassword);
+          final storageRef = FirebaseStorage.instance
+              .ref()
+              .child('user_images')
+              .child("${userCredentials.user!.uid}.jpg");
+          await storageRef.putFile(_userPickedImage!);
+          final imageUrl = await storageRef.getDownloadURL();
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userCredentials.user!.uid)
+              .set({
+            'username': _enteredUsername,
+            'email': _enteredEmail,
+            'imageUrl': imageUrl
+          });
         }
       } on FirebaseAuthException catch (e) {
         if (!context.mounted) return;
@@ -44,6 +69,9 @@ class _AuthScreenState extends State<AuthScreen> {
             content: Text(e.message ?? 'Authentication failed'),
           ),
         );
+        setState(() {
+          _isAuthenticating = false;
+        });
       }
     }
   }
@@ -72,11 +100,12 @@ class _AuthScreenState extends State<AuthScreen> {
                       key: _formKey,
                       child: Column(
                         children: [
-                          if(!_isLogin) UserImagePicker(pickedImage: (image) {
-                            setState(() {
-                              _userPickedImage = image;
-                            });
-                          }),
+                          if (!_isLogin)
+                            UserImagePicker(pickedImage: (image) {
+                              setState(() {
+                                _userPickedImage = image;
+                              });
+                            }),
                           TextFormField(
                             validator: (value) {
                               if (value == null ||
@@ -105,8 +134,15 @@ class _AuthScreenState extends State<AuthScreen> {
                               _enteredEmail = newValue!;
                             },
                           ),
-                          if(!_isLogin)
+                          if (!_isLogin)
                             TextFormField(
+                              validator: (value) {
+                                if (value == null ||
+                                    value.trim().isEmpty) {
+                                  return 'Please enter a valid Username';
+                                }
+                                return null;
+                              },
                               decoration: InputDecoration(
                                 label: Text(
                                   "Username",
@@ -122,6 +158,9 @@ class _AuthScreenState extends State<AuthScreen> {
                               keyboardType: TextInputType.emailAddress,
                               autocorrect: false,
                               textCapitalization: TextCapitalization.none,
+                              onSaved: (newValue) {
+                                _enteredUsername = newValue!;
+                              },
                             ),
                           TextFormField(
                               validator: (value) {
@@ -158,43 +197,53 @@ class _AuthScreenState extends State<AuthScreen> {
                               onSaved: (newValue) {
                                 _enteredPassword = newValue!;
                               }),
-                          Padding(
-                            padding: const EdgeInsets.only(top: 10.0),
-                            child: ElevatedButton(
-                              onPressed: _submit,
-                              style: ButtonStyle(
-                                backgroundColor: MaterialStateProperty.all(
-                                  const Color.fromARGB(255, 228, 199, 255),
-                                ),
-                                foregroundColor: MaterialStateProperty.all(
-                                  Theme.of(context).colorScheme.primary,
-                                ),
-                              ),
-                              child: Text(
-                                _isLogin ? "Login" : "Signup",
-                                style: const TextStyle(fontWeight: FontWeight.bold),
-                              ),
+                          if (_isAuthenticating)
+                            const Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: CircularProgressIndicator(),
                             ),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              setState(() {
-                                _isLogin = !_isLogin;
-                              });
-                            },
-                            child: Text(
-                              _isLogin
-                                  ? "Create an acount ? "
-                                  : "I already have an acount",
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelLarge!
-                                  .copyWith(
-                                      color:
-                                          Theme.of(context).colorScheme.primary,
+                          if (!_isAuthenticating)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 10.0),
+                              child: ElevatedButton(
+                                onPressed: _submit,
+                                style: ButtonStyle(
+                                  backgroundColor: MaterialStateProperty.all(
+                                    const Color.fromARGB(255, 228, 199, 255),
+                                  ),
+                                  foregroundColor: MaterialStateProperty.all(
+                                    Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
+                                child: Text(
+                                  _isLogin ? "Login" : "Signup",
+                                  style: const TextStyle(
                                       fontWeight: FontWeight.bold),
+                                ),
+                              ),
                             ),
-                          ),
+                          if (!_isAuthenticating)
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _isLogin = !_isLogin;
+                                  _formKey.currentState!.reset();
+                                });
+                              },
+                              child: Text(
+                                _isLogin
+                                    ? "Create an acount ? "
+                                    : "I already have an acount",
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelLarge!
+                                    .copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                        fontWeight: FontWeight.bold),
+                              ),
+                            ),
                         ],
                       ),
                     ),
